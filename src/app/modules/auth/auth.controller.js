@@ -1,71 +1,139 @@
-const User = require('./auth.model');
-const catchAsync = require('../../../share/catch.async');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
+const User = require("./auth.model");
+const catchAsync = require("../../../share/catch.async");
+const cron = require("node-cron");
 
-const signUp = catchAsync(async (req, res)=>{
-    const {body} = req;
-    const password = await bcrypt.hash(body.password, 10);
+const {signUpAccount, verifyAccount, loginAccount, resendOTP} = require('./auth.service');
 
-    const user = new User({
-        name: body.name,
-        email: body.email,
-        role: body.role,
-        address: body.address,
-        dateOfBirth: body.dateOfBirth,
-        password: password,
-        confirmPassword: password,
+const signUp = catchAsync(async (req, res) => {
+
+  const email = await signUpAccount(req.body);
+
+  res.status(200).json({
+    status: true,
+    message: `Please check your mail we send a verification code in your email ${email}`,
+  });
+});
+
+const activeAccount = catchAsync(async (req, res) => {
+
+  const token = await verifyAccount(req.body, res);
+
+  res.status(200).json({
+    status: true,
+    message: "Account activated successfully.",
+    accessToken: token,
+  });
+});
+
+const resendActiveAccount = catchAsync(async (req, res)=>{
+
+  const data = await resendOTP(req.body);
+
+  res.status(200).json({
+    status: data,
+    message: "OTP Resend successful"
+  });
+});
+
+// Run Cron and if user account not active then remove user from database
+cron.schedule("*/5 * * * *", async () => {
+
+  // 20 minutes ago
+  const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000);
+  console.log("Call Gron Job", twentyMinutesAgo);
+  try {
+
+    // Find unverified users who were created more than 20 minutes ago
+    const result = await User.deleteMany({
+      isActive: false,
+      role: "USER",
+      createdAt: { $lt: twentyMinutesAgo },
     });
-    const savedUser = await user.save();
-    console.log(req.body);
-    const { name, email, role, address, dateOfBirth } = savedUser;
-    res.status(201).json({
-        message: "Request send Successful",
-        data: {
-            name,
-            email,
-            role,
-            address,
-            dateOfBirth,
-        },
-    });
+
+    console.log(`Cron Job: Deleted ${result.deletedCount} unverified users.`);
+
+  } catch (error) {
+    console.error("Error during cleanup:", error.message);
+  }
 });
 
-const login = catchAsync(async (req, res)=>{
-    const { email, password } = req.body;
-    const user = await User.findOne({ email }).select("name email role address dateOfBirth");
+const login = catchAsync(async (req, res) => {
+  const token = await loginAccount(req.body);
 
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid email or password' });
-    }
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-        return res.status(400).json({ message: 'Invalid email or password' });
-    }
-    const token = jwt.sign({
-        id: user._id,
-    },process.env.SECRET);
-    const {  } = user;
-    res.status(200).json({ message: 'Login successful', data: user,accessToken: token});
+  res.status(200).json({
+    status: true,
+    message: "Login successful",
+    accessToken: token,
+  });
 });
 
+const user = catchAsync(async (req, res) => {
 
+  //Get USER ID from middleware added from respose header
+  const userId = req.userId;
 
-const users = catchAsync(async (req, res)=>{
-    const { userId } = req.userId;
-    const user = await User.findOne({ userId }).select("name email role address dateOfBirth");
+  //Checking User Id
+  if(!userId){
+    throw new ApiError(400, "You are not valid user");
+  }
 
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid email or password' });
-    }
-    res.status(200).json({ message: 'User Get successful', data: user});
+  //Find User
+  const user = await User.findById(userId).select("name profileImage email role isActive address dateOfBirth createdAt updatedAt");
+
+  //Check Is Have User data or Not
+  if (!user) {
+    return res.status(404).json({ message: "User not exit" });
+  }
+
+  //Return Respose
+  res.status(200).json({ message: "User Get successful", data: user });
 });
 
+const update = catchAsync(async (req, res) => {
+  const userId = req.userId;
+  const { name, address, dateOfBirth } = req.body;
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { name, address, dateOfBirth },
+    { new: true, runValidators: true }
+  ).select("name email role address dateOfBirth");
+
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  res.status(200).json({
+    message: "User updated successfully",
+    data: user,
+  });
+});
+
+const deleteUser = catchAsync(async (req, res) => {
+  const userId = req.userId;
+
+  const user = await User.findByIdAndDelete(userId).select(
+    "name email role address dateOfBirth"
+  );
+
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  res.status(200).json({
+    message: "User deleted successfully",
+    data: user,
+  });
+});
 
 const AuthController = {
-    signUp,
-    login,
-    users
-  };
-  
-  module.exports = { AuthController };
+  signUp,
+  activeAccount,
+  resendActiveAccount,
+  login,
+  user,
+  update,
+  deleteUser,
+};
+
+module.exports = { AuthController };
