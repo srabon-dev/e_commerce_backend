@@ -2,18 +2,21 @@ const User = require("./auth.model");
 const catchAsync = require("../../../share/catch.async");
 const cron = require("node-cron");
 
-const {signUpAccount, verifyAccount, loginAccount, resendOTP} = require('./auth.service');
+const {signUpAccount, verifyAccount, loginAccount, resendOTP, forgetOTPVerify, resetOldPassword} = require('./auth.service');
 
+
+//###################################################################### Sign Up START #############################################################################################
 const signUp = catchAsync(async (req, res) => {
 
   const email = await signUpAccount(req.body);
 
   res.status(200).json({
     status: true,
-    message: `Please check your mail we send a verification code in your email ${email}`,
+    message: `Please check your email we send a verification code in your email ${email}`,
   });
 });
 
+//###################################################################### Active Account START #############################################################################################
 const activeAccount = catchAsync(async (req, res) => {
 
   const token = await verifyAccount(req.body, res);
@@ -25,6 +28,7 @@ const activeAccount = catchAsync(async (req, res) => {
   });
 });
 
+//###################################################################### RESEND Active OTP START #############################################################################################
 const resendActiveAccount = catchAsync(async (req, res)=>{
 
   const data = await resendOTP(req.body);
@@ -35,6 +39,7 @@ const resendActiveAccount = catchAsync(async (req, res)=>{
   });
 });
 
+//###################################################################### Cron Check And Delete Unverified User START #############################################################################################
 // Run Cron and if user account not active then remove user from database
 cron.schedule("*/5 * * * *", async () => {
 
@@ -50,7 +55,16 @@ cron.schedule("*/5 * * * *", async () => {
       createdAt: { $lt: twentyMinutesAgo },
     });
 
-    console.log(`Cron Job: Deleted ${result.deletedCount} unverified users.`);
+    const updatedResult = await User.updateMany(
+      {
+        role: "USER",
+        updatedAt: { $lt: twentyMinutesAgo }, // Check last update was within 20 minutes
+        activationCode: { $exists: true, $ne: null }, // Ensure activationCode exists
+      },
+      { $set: { activationCode: null } }
+    );
+
+    console.log(`Cron Job: Deleted ${result.deletedCount} unverified users. and update activition code null ${updatedResult.matchedCount}`);
 
   } catch (error) {
     console.error("Error during cleanup:", error.message);
@@ -67,62 +81,36 @@ const login = catchAsync(async (req, res) => {
   });
 });
 
-const user = catchAsync(async (req, res) => {
+//###################################################################### FORGET PASSWORD START #############################################################################################
+const forgetPassword = catchAsync(async (req, res)=>{
 
-  //Get USER ID from middleware added from respose header
-  const userId = req.userId;
-
-  //Checking User Id
-  if(!userId){
-    throw new ApiError(400, "You are not valid user");
-  }
-
-  //Find User
-  const user = await User.findById(userId).select("name profileImage email role isActive address dateOfBirth createdAt updatedAt");
-
-  //Check Is Have User data or Not
-  if (!user) {
-    return res.status(404).json({ message: "User not exit" });
-  }
-
-  //Return Respose
-  res.status(200).json({ message: "User Get successful", data: user });
-});
-
-const update = catchAsync(async (req, res) => {
-  const userId = req.userId;
-  const { name, address, dateOfBirth } = req.body;
-
-  const user = await User.findByIdAndUpdate(
-    userId,
-    { name, address, dateOfBirth },
-    { new: true, runValidators: true }
-  ).select("name email role address dateOfBirth");
-
-  if (!user) {
-    return res.status(404).json({ message: "User not found" });
-  }
+  const data = await resendOTP(req.body);
 
   res.status(200).json({
-    message: "User updated successfully",
-    data: user,
+    status: data,
+    message: `Please check your mail we send a verification code in your email ${req.body.email}`
   });
 });
 
-const deleteUser = catchAsync(async (req, res) => {
-  const userId = req.userId;
+//###################################################################### FORGET PASSWORD START #############################################################################################
+const forgetPasswordOTP = catchAsync(async (req, res)=>{
 
-  const user = await User.findByIdAndDelete(userId).select(
-    "name email role address dateOfBirth"
-  );
-
-  if (!user) {
-    return res.status(404).json({ message: "User not found" });
-  }
+  const data = await forgetOTPVerify(req.body, res);
 
   res.status(200).json({
-    message: "User deleted successfully",
-    data: user,
+    status: data,
+    message: `OTP verification successful!`
+  });
+});
+
+//###################################################################### RESET PASSWORD START #############################################################################################
+const resetPassword = catchAsync(async (req, res)=>{
+
+  const data = await resetOldPassword(req.body);
+
+  res.status(200).json({
+    status: data,
+    message: "Password has been reset successfully"
   });
 });
 
@@ -131,9 +119,9 @@ const AuthController = {
   activeAccount,
   resendActiveAccount,
   login,
-  user,
-  update,
-  deleteUser,
+  forgetPassword,
+  forgetPasswordOTP,
+  resetPassword
 };
 
 module.exports = { AuthController };

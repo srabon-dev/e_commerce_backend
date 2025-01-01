@@ -1,5 +1,4 @@
 const User = require("./auth.model");
-const catchAsync = require("../../../share/catch.async");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const createActivationToken = require("../../../utils/token.create");
@@ -7,7 +6,6 @@ const { sendEmail } = require("../../../utils/send.mail");
 const { registrationSuccessEmailBody } = require("../../../mails/email.signup");
 const { USER_ROLE, HTTP_STATUS } = require("../../../utils/enum");
 const ApiError = require("../../../error/api.error");
-const cron = require("node-cron");
 
 //###################################################################### SIGN UP START #############################################################################################
 const signUpAccount = async (payload) => {
@@ -132,6 +130,7 @@ const verifyAccount = async (payload, res) => {
   return token;
 };
 
+//###################################################################### RESEND OTP START #############################################################################################
 const resendOTP = async (plyload) => {
   const { email } = plyload;
 
@@ -145,6 +144,10 @@ const resendOTP = async (plyload) => {
 
   // Check if email already exists
   const existingUser = await User.findOne({ email });
+
+  if (!existingUser) {
+    throw new ApiError(404, "User not found");
+  }
 
   //OTP Create
   const { activationCode } = createActivationToken();
@@ -226,9 +229,99 @@ const loginAccount = async (payload) => {
   return token;
 };
 
+//###################################################################### FORGET PASSWORD OTP START #############################################################################################
+
+const forgetOTPVerify = async (payload, res) => {
+  //Req All Body Receive
+  const { email, otp } = payload;
+
+  // Validation Password and email
+  if (!email || !otp) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "OTP are required!");
+  }
+
+  //Get User data from Database
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    throw new ApiError(404, "User not found!");
+  }
+
+  // Check if the account is locked
+  if (user.lockUntil && user.lockUntil > Date.now()) {
+    const remainingTime = Math.ceil((user.lockUntil - Date.now()) / 60000); // in minutes
+    throw new ApiError(
+      403,
+      `Account locked. Try again in ${remainingTime} minute(s).`
+    );
+  }
+
+  //checking OTP
+  if (user.activationCode !== otp) {
+    user.loginAttempts += 1;
+
+    // Lock account if attempts exceed 5
+    if (user.loginAttempts >= 5) {
+      user.lockUntil = new Date(Date.now() + 20 * 60000);
+      user.loginAttempts = 0; // Reset attempts after locking
+    }
+
+    await user.save();
+    return res.status(400).json({ message: "Invalid activation code." });
+  }
+
+  user.forgetCode = true;
+  user.activationCode = null;
+  await user.save();
+  return true;
+};
+
+//###################################################################### RESET PASSWORD START #############################################################################################
+
+const resetOldPassword = async (payload) => {
+  //Req All Body Receive
+  const { email, password, confirmPassword } = payload;
+
+  // Validation Password and email
+  if (!email || !password || !confirmPassword) {
+    throw new ApiError(HTTP_STATUS.BAD_REQUEST, "Password and Confirm Password are required!");
+  }
+
+  
+  // Validation Password and confirm password
+  if (password !== confirmPassword) {
+    throw new ApiError(
+      HTTP_STATUS.BAD_REQUEST,
+      "Password and Confirm Password didn't match"
+    );
+  }
+
+  //Get User data from Database
+  const user = await User.findOne({ email });
+
+  if (!user) {
+    throw new ApiError(404, "User not found!");
+  }
+
+  if (!user.forgetCode) {
+    throw new ApiError(404,`you are not verified person for reset password`);
+  }
+
+    // hashedPassword
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user.password = hashedPassword;
+  user.forgetCode = false;
+  await user.save();
+  return true;
+};
+
+
+
 module.exports = {
   signUpAccount,
   verifyAccount,
   resendOTP,
+  forgetOTPVerify,
+  resetOldPassword,
   loginAccount,
 };

@@ -14,6 +14,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: ""
     },
+    profileImagePublicId: {
+      type: String,
+      default: ""
+    },
     email: {
       type: String,
       required: [true, "Email is required"], // Validation: Required
@@ -40,6 +44,10 @@ const userSchema = new mongoose.Schema(
     activationCode: {
       type: String,
       default: "",
+    },
+    forgetCode: {
+      type: Boolean,
+      default: false,
     },
     loginAttempts: { type: Number, default: 0 },
     lockUntil: { type: Date, default: null },

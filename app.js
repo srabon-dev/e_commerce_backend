@@ -3,6 +3,7 @@ const bodyParser = require('body-parser');
 const cookieParser = require('cookie-parser');
 const app = express();
 const router = require('./src/app/route/router');
+const path = require('path');
 
 const notFoundError = require('./src/error/not.found.error.js');
 const globalErrorHandler = require('./src/error/global.error.js');
@@ -12,8 +13,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-app.use(express.static("uploads"));
-
+app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/api', router);
 
 
